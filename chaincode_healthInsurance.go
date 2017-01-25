@@ -20,8 +20,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-
+	
 	"github.com/hyperledger/fabric/core/chaincode/shim"
+	"github.com/hyperledger/fabric/core/crypto/primitives"
 )
 
 // SimpleHealthChaincode example simple Chaincode implementation
@@ -32,6 +33,7 @@ type SimpleHealthChaincode struct {
 // Main
 // ============================================================================================================================
 func main() {
+	primitives.SetSecurityLevel("SHA", 256)	
 	err := shim.Start(new(SimpleHealthChaincode))
 	if err != nil {
 		fmt.Printf("Error starting Simple chaincode: %s", err)
@@ -64,30 +66,114 @@ func (t *SimpleHealthChaincode) Init(stub shim.ChaincodeStubInterface, function 
 
 	fmt.Println("Admin is [%x] : ", adminCert)
 	
+	fmt.Println("Assigning Amount for admin!")
+	ok, err:= stub.InsertRow("InsuranceAmount", shim.Row{
+		Columns: []*shim.Column {
+			&shim.Column{Value: &shim.Column_String_{String_:"admin"}},
+			&shim.Column{Value: &shim.Column_Int32{Int32:1000}},
+		}
+	})
+	if err != nil {
+		return nil, errors.New("Failed to Assign Amount!")
+	}
 	
 
 	fmt.Println("Init Finished!")
 
 	return nil, nil
 }
-func (t *SimpleHealthChaincode) assign(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	fmt.Println("assign is running " + function)
-	owner := arg[0];
-err:= stub.InsertRow("InsuranceAmount", shim.Row{
+func (t *SimpleHealthChaincode) approve(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+	fmt.Println("approve is running " + function)
+	
+	if len(args) != 2{
+		return nil, errors.New("Expected 2 arguments!")
+	}
+
+	ReqAmount := args[0]
+	applicant, err := base64.StdEncoding.DecodeString(args[1])
+	if err != nil{
+		return nil, errors.New("Decoding Failed!")
+	}
+
+	adminCert, err := stub.GetState("admin")
+	if err != nil{
+		return nil, errors.New("Failed to get admin Certificate!")
+	}
+
+	ok, err := t.isCaller(stub, adminCert)
+	if err != nil {
+		return nil, errors.New("Failed to Check Certificates!")
+	}
+	if !ok {
+		return nil, errors.New("Only Admin can call Approve function")
+	}
+
+	fmt.Println("Assigning Amount!")
+	ok, err:= stub.InsertRow("InsuranceAmount", shim.Row{
 		Columns: []*shim.Column {
 			&shim.Column{Value: &shim.Column_String_{String_:owner}},
-			&shim.Column{Value: &shim.Column_Int32{Int32:1000}},
+			&shim.Column{Value: &shim.Column_Int32{Int32:ReqAmount}},
 		}
 	})
+	if err != nil {
+		return nil, errors.New("Failed to Assign Amount!")
+	}
+	//???
+	if !ok && err == nil {
+		return nil, errors.New("Amount already Assigned")
+	}
+
+	fmt.Println("Approve Finished")
+	return nil, err
 }
+
+func (t *AssetManagementChaincode) isCaller(stub shim.ChaincodeStubInterface, certificate []byte) (bool, error) {
+	// Verify \sigma=Sign(certificate.sk, tx.Payload||tx.Binding) against certificate.vk
+	fmt.Println("isCaller is Running!")
+
+	sigma, err := stub.GetCallerMetadata()
+	if err != nil {
+		return false, errors.New("Failed to get Metadata")
+	}
+	payload, err := stub.GetPayload()
+	if err != nil {
+		return false, errors.New("Failed to get payload")
+	}
+	binding, err := stub.GetBinding()
+	if err != nil {
+		return false, errors.New("Failed to get binding")
+	}
+
+	fmt.Println("Certificate : [%x]", certificate)
+	fmt.Println("Sigma : [%x]", sigma)
+	fmt.Println("Payload : [%x]", payload)
+	fmt.Println("Binding : [%x]", binding)
+
+	ok, err := stub.VerifySignature(
+		certificate,
+		sigma,
+		append(payload, binding...),
+	)
+	if err != nil {
+		return nil, errors.New("Failed Verifying signatures")
+	}
+	if !ok {
+		return nil, errors.New("Signatures Does Not Match!")
+	}
+	fmt.Println("finished isCaller")
+	
+	return ok, err
+}
+
+
 // Invoke is our entry point to invoke a chaincode function
 func (t *SimpleHealthChaincode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	fmt.Println("invoke is running " + function)
 
 	// Handle different functions
-	if function == "init" {													//initialize the chaincode state, used as reset
-		return t.Init(stub, "init", args)
-	}
+	if function == "approve" {													//initialize the chaincode state, used as reset
+		return t.approve(stub, args)
+	} 
 	fmt.Println("invoke did not find func: " + function)					//error
 
 	return nil, errors.New("Received unknown function invocation: " + function)
@@ -98,11 +184,33 @@ func (t *SimpleHealthChaincode) Query(stub shim.ChaincodeStubInterface, function
 	fmt.Println("query is running " + function)
 
 	// Handle different functions
-	if function == "dummy_query" {											//read a variable
-		fmt.Println("hi there " + function)						//error
-		return nil, nil;
+	if function == "read" {											//read a variable
+		return t.read(stub, args)
 	}
 	fmt.Println("query did not find func: " + function)						//error
 
 	return nil, errors.New("Received unknown function query: " + function)
+}
+
+func (t *SimpleHealthChaincode) read(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error){
+	
+	if len(args) != 1 {
+		return nil, errors.New("Expected 1 argument!")
+	}
+	applicant, err := base64.StdEncoding.DecodeString(args[0])
+	//fmt.Println("Finding [%x]",string(applicant))
+
+	var columns []shim.Column
+	col := shim.Column{Value: shim.Column_Bytes{Bytes: applicant}}
+	columns = append(columns,col)
+
+	row, err := stub.GetRow("InsuranceAmount",columns)
+	if err != nil {
+		return nil, errors.New("Cannot retrieve Rows")
+	}
+	
+	fmt.Println("Finished Query function")
+
+	return row.Columns[1].GetString(), nil
+
 }
