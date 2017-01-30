@@ -1,12 +1,9 @@
 /*
 Copyright IBM Corp 2016 All Rights Reserved.
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
-
 		 http://www.apache.org/licenses/LICENSE-2.0
-
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,7 +14,7 @@ limitations under the License.
 package main
 
 import (
-	"encoding/base64"
+	//"encoding/base64"
 	"errors"
 	"fmt"
 	"strconv"
@@ -48,7 +45,7 @@ func (t *SimpleHealthChaincode) Init(stub shim.ChaincodeStubInterface, function 
 	}
 	err:=stub.CreateTable("InsuranceAmount", []*shim.ColumnDefinition{
 		&shim.ColumnDefinition{Name:"Owner",Type: shim.ColumnDefinition_BYTES, Key: true},
-		&shim.ColumnDefinition{Name:"Amount",Type:shim.ColumnDefinition_INT32, Key: false},
+		&shim.ColumnDefinition{Name:"Amount",Type:shim.ColumnDefinition_INT64, Key: false},
 	})
 	if err!= nil {
 		return nil, errors.New("Error in Creating InsuranceAmount Table!")
@@ -70,7 +67,7 @@ func (t *SimpleHealthChaincode) Init(stub shim.ChaincodeStubInterface, function 
 	_, err = stub.InsertRow("InsuranceAmount", shim.Row{
 		Columns: []*shim.Column {
 			&shim.Column{Value: &shim.Column_Bytes{Bytes:[]byte("admin")}},
-			&shim.Column{Value: &shim.Column_Int32{Int32:1000}}},
+			&shim.Column{Value: &shim.Column_Int64{Int64:1000}}},
 	})
 	if err != nil {
 		return nil, errors.New("Failed to Assign Amount!")
@@ -88,12 +85,12 @@ func (t *SimpleHealthChaincode) approve(stub shim.ChaincodeStubInterface, args [
 		return nil, errors.New("Expected 2 arguments!")
 	}
 
-	ReqAmount, _ := strconv.ParseInt(args[0], 10, 64)
+	ReqAmount, _ := strconv.ParseInt(args[1], 10, 64)
 
-	applicant, err := base64.StdEncoding.DecodeString(args[1])
-	if err != nil{
+	applicant := []byte(args[0])
+	/*if err != nil{
 		return nil, errors.New("Decoding Failed!")
-	}
+	}*/
 
 	adminCert, err := stub.GetState("admin")
 	if err != nil{
@@ -196,7 +193,7 @@ func (t *SimpleHealthChaincode) read(stub shim.ChaincodeStubInterface, args []st
 	if len(args) != 1 {
 		return nil, errors.New("Expected 1 argument!")
 	}
-	applicant, err := base64.StdEncoding.DecodeString(args[0])
+	applicant := []byte(args[0])
 	//fmt.Println("Finding [%x]",string(applicant))
 
 	var columns []shim.Column
@@ -212,6 +209,6 @@ func (t *SimpleHealthChaincode) read(stub shim.ChaincodeStubInterface, args []st
 	
 	rowString := fmt.Sprintf("%s", row)
 	return []byte(rowString), nil
-	//return row.Columns[1].GetInt64(), nil
+	//return row.Columns[0].GetBytes(), nil
 
 }
